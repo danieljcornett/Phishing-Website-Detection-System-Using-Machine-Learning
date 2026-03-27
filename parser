@@ -1,0 +1,30 @@
+# parser.py
+import re
+from nltk.tokenize import RegexpTokenizer
+from nltk.stem.snowball import SnowballStemmer
+
+class EmailParser:
+    def __init__(self):
+        self.tokenizer = RegexpTokenizer(r'[A-Za-z]+') 
+        self.stemmer = SnowballStemmer('english') 
+
+    def extract_and_process(self, raw_email: str) -> dict:
+        # In a production environment, utilize Python's email.parser for MIME separation
+        body_text = self._extract_body(raw_email)
+        urls = self._extract_urls(raw_email)
+        
+        tokens = self.tokenizer.tokenize(body_text)
+        processed_body = ' '.join([self.stemmer.stem(word) for word in tokens])
+        
+        return {
+            "processed_body": processed_body,
+            "urls": urls
+        }
+        
+    def _extract_body(self, text: str) -> str:
+        # Simplified extraction logic placeholder
+        return text
+        
+    def _extract_urls(self, text: str) -> list:
+        url_pattern = re.compile(r'https?://\S+|www\.\S+')
+        return url_pattern.findall(text)
