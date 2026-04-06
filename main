@@ -3,8 +3,8 @@ from fastapi import FastAPI
 from pydantic import BaseModel
 from parser import EmailParser
 from privacy import PrivacyManager
-# import joblib 
-# model = joblib.load('logistic_regression_model.pkl') 
+import joblib 
+model = joblib.load('logistic_regression_model.pkl') 
 
 app = FastAPI(title="Anti-Phishing Detection API")
 parser = EmailParser()
