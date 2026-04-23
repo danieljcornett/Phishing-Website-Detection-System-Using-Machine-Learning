@@ -9,6 +9,11 @@ class EmailParser:
         self.tokenizer = RegexpTokenizer(r'[A-Za-z]+')
         self.stemmer = SnowballStemmer('english')
 
+    def process_url(self, url: str) -> str:
+        """Tokenize + stem a single URL for the ML model."""
+        tokens = self.tokenizer.tokenize(url)
+        return ' '.join([self.stemmer.stem(t) for t in tokens])
+
     def extract_and_process(self, raw_email: str) -> dict:
         """
         Extracts URLs and the email body from raw email text,
@@ -17,19 +22,14 @@ class EmailParser:
         body_text = self._extract_body(raw_email)
         urls = self._extract_urls(raw_email)
 
-        # Process the email body (for display / future use)
         body_tokens = self.tokenizer.tokenize(body_text)
         processed_body = ' '.join([self.stemmer.stem(w) for w in body_tokens])
 
-        # Process each URL the same way the model was trained:
-        # tokenize → stem → join into a single string per URL
         processed_urls = []
         for url in urls:
-            tokens = self.tokenizer.tokenize(url)
-            stemmed = ' '.join([self.stemmer.stem(t) for t in tokens])
             processed_urls.append({
                 "raw": url,
-                "processed": stemmed
+                "processed": self.process_url(url)
             })
 
         return {
@@ -39,7 +39,6 @@ class EmailParser:
         }
 
     def _extract_body(self, text: str) -> str:
-        # Strip common email headers so they don't pollute URL extraction
         lines = text.splitlines()
         body_lines = []
         in_header = True
