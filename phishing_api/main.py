@@ -41,11 +41,22 @@ class EmailRequest(BaseModel):
     raw_email: str
     privacy_mode: bool = True   # Secure by default — never logs data
 
+class URLRequest(BaseModel):
+    url: str
+
 class URLResult(BaseModel):
     url: str
     is_phishing: bool
     confidence: float           # 0.0 → 1.0 probability of being phishing
     risk_level: str             # "LOW" | "MEDIUM" | "HIGH" | "CRITICAL"
+
+class URLPredictResponse(BaseModel):
+    url: str
+    is_phishing: bool
+    confidence: float
+    risk_level: str
+    verdict: str
+    message: str
 
 class AnalysisResponse(BaseModel):
     overall_verdict: str        # "SAFE" | "SUSPICIOUS" | "PHISHING"
@@ -110,12 +121,10 @@ def run_inference(features: dict) -> dict:
         raw_url       = entry["raw"]
         processed_url = entry["processed"]
 
-        # Vectorize with the same CountVectorizer used during training
         vec = vectorizer.transform([processed_url])
 
-        # Probability of being "bad" (phishing)
         proba        = model.predict_proba(vec)[0]
-        classes      = list(model.classes_)          # e.g. ['bad', 'good']
+        classes      = list(model.classes_)
         bad_idx      = classes.index("bad") if "bad" in classes else 0
         phish_prob   = float(proba[bad_idx])
         is_phishing  = phish_prob >= 0.5
@@ -144,6 +153,35 @@ def run_inference(features: dict) -> dict:
 @app.get("/health")
 async def health():
     return {"status": "ok", "model": MODEL_PATH, "vectorizer": VECTORIZER_PATH}
+
+@app.post("/predict", response_model=URLPredictResponse)
+async def predict_url(request: URLRequest):
+    """Check a single URL directly — no email needed."""
+    processed = parser.process_url(request.url)
+    vec = vectorizer.transform([processed])
+
+    proba   = model.predict_proba(vec)[0]
+    classes = list(model.classes_)
+    bad_idx = classes.index("bad") if "bad" in classes else 0
+    prob    = float(proba[bad_idx])
+    is_phishing = prob >= 0.5
+    risk    = _risk_level(prob)
+
+    if is_phishing:
+        verdict = "PHISHING" if prob >= 0.85 else "SUSPICIOUS"
+        message = f"🚨 This URL appears malicious ({prob*100:.1f}% confidence). Do NOT visit." if prob >= 0.85 else f"⚠️ This URL looks suspicious ({prob*100:.1f}% confidence). Proceed with caution."
+    else:
+        verdict = "SAFE"
+        message = f"✅ This URL appears safe ({(1-prob)*100:.1f}% confidence)."
+
+    return URLPredictResponse(
+        url         = request.url,
+        is_phishing = is_phishing,
+        confidence  = round(prob, 4),
+        risk_level  = risk,
+        verdict     = verdict,
+        message     = message,
+    )
 
 @app.post("/analyze", response_model=AnalysisResponse)
 async def analyze_email(request: EmailRequest):
