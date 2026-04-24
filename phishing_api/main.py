@@ -9,18 +9,18 @@ from pydantic import BaseModel
 from parser import EmailParser
 from privacy import PrivacyManager
 
-# ── NLTK bootstrap ────────────────────────────────────────────────────────────
+# NLTK bootstrap
 nltk.download('punkt', quiet=True)
 nltk.download('punkt_tab', quiet=True)
 
-# ── Load model + vectorizer ───────────────────────────────────────────────────
+# Load model + vectorizer 
 MODEL_PATH      = os.getenv("MODEL_PATH",      "phishing.pkl")
 VECTORIZER_PATH = os.getenv("VECTORIZER_PATH", "vectorizer.pkl")
 
 model      = joblib.load(MODEL_PATH)
 vectorizer = joblib.load(VECTORIZER_PATH)
 
-# ── App setup ─────────────────────────────────────────────────────────────────
+# App setup 
 app = FastAPI(
     title="Anti-Phishing Detection API",
     description="Scans email URLs and returns a phishing risk assessment.",
@@ -36,10 +36,10 @@ app.add_middleware(
 
 parser = EmailParser()
 
-# ── Request / Response models ─────────────────────────────────────────────────
+# Request / Response models
 class EmailRequest(BaseModel):
     raw_email: str
-    privacy_mode: bool = True   # Secure by default — never logs data
+    privacy_mode: bool = True   # Secure by default (never logs data)
 
 class URLRequest(BaseModel):
     url: str
@@ -66,7 +66,7 @@ class AnalysisResponse(BaseModel):
     urls_found: int
     phishing_urls_found: int
 
-# ── Helpers ───────────────────────────────────────────────────────────────────
+# Helper Funcs 
 def _risk_level(prob: float) -> str:
     if prob < 0.40:
         return "LOW"
@@ -102,7 +102,7 @@ def _verdict(phishing_urls: int, total_urls: int, max_conf: float) -> tuple[str,
         )
     return verdict, msg
 
-# ── Inference function (passed into PrivacyManager) ───────────────────────────
+# Inference function (passed into PrivacyManager)
 def run_inference(features: dict) -> dict:
     processed_urls = features.get("processed_urls", [])
 
@@ -149,7 +149,7 @@ def run_inference(features: dict) -> dict:
         "phishing_urls_found": len(phishing_urls),
     }
 
-# ── Routes ────────────────────────────────────────────────────────────────────
+# Routes 
 @app.get("/health")
 async def health():
     return {"status": "ok", "model": MODEL_PATH, "vectorizer": VECTORIZER_PATH}
@@ -169,10 +169,10 @@ async def predict_url(request: URLRequest):
 
     if is_phishing:
         verdict = "PHISHING" if prob >= 0.85 else "SUSPICIOUS"
-        message = f"🚨 This URL appears malicious ({prob*100:.1f}% confidence). Do NOT visit." if prob >= 0.85 else f"⚠️ This URL looks suspicious ({prob*100:.1f}% confidence). Proceed with caution."
+        message = f"This URL appears malicious ({prob*100:.1f}% confidence). Do NOT visit." if prob >= 0.85 else f"⚠️ This URL looks suspicious ({prob*100:.1f}% confidence). Proceed with caution."
     else:
         verdict = "SAFE"
-        message = f"✅ This URL appears safe ({(1-prob)*100:.1f}% confidence)."
+        message = f"This URL appears safe ({(1-prob)*100:.1f}% confidence)."
 
     return URLPredictResponse(
         url         = request.url,

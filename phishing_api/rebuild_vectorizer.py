@@ -1,14 +1,4 @@
-"""
-rebuild_vectorizer.py
-─────────────────────
-Run this ONCE with your original dataset to recreate and save vectorizer.pkl.
-
-Usage:
-    python rebuild_vectorizer.py --dataset path/to/phishing_site_urls.csv
-
-The CSV must have columns: URL, Label  (Label values: 'good' | 'bad')
-"""
-
+# Don't run again, only used to rebuild since lost
 import argparse
 import joblib
 import pandas as pd
@@ -40,7 +30,7 @@ def main():
     cv.fit(df['text'])
 
     joblib.dump(cv, args.output)
-    print(f"✅  Vectorizer saved to {args.output}  (vocab size: {len(cv.vocabulary_)})")
+    print(f"Vectorizer saved to {args.output}  (vocab size: {len(cv.vocabulary_)})")
 
 if __name__ == "__main__":
     main()

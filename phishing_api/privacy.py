@@ -6,7 +6,7 @@ class PrivacyManager:
         """
         Enforces Local Ephemeral Inference.
         If is_private is True, the payload remains strictly in memory
-        and is never logged or persisted.
+        and is never logged or persisted
         """
         prediction_result = model_predict_func(email_data)
 
