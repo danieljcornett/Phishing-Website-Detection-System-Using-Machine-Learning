@@ -1,5 +1,6 @@
 # main.py
 import os
+import re
 import joblib
 import nltk
 import numpy as np
@@ -9,18 +10,18 @@ from pydantic import BaseModel
 from parser import EmailParser
 from privacy import PrivacyManager
 
-# NLTK bootstrap
+# ── NLTK bootstrap ────────────────────────────────────────────────────────────
 nltk.download('punkt', quiet=True)
 nltk.download('punkt_tab', quiet=True)
 
-# Load model + vectorizer 
+# ── Load model + vectorizer ───────────────────────────────────────────────────
 MODEL_PATH      = os.getenv("MODEL_PATH",      "phishing.pkl")
 VECTORIZER_PATH = os.getenv("VECTORIZER_PATH", "vectorizer.pkl")
 
 model      = joblib.load(MODEL_PATH)
 vectorizer = joblib.load(VECTORIZER_PATH)
 
-# App setup 
+# ── App setup ─────────────────────────────────────────────────────────────────
 app = FastAPI(
     title="Anti-Phishing Detection API",
     description="Scans email URLs and returns a phishing risk assessment.",
@@ -36,10 +37,59 @@ app.add_middleware(
 
 parser = EmailParser()
 
-# Request / Response models
+# ── Trusted domain whitelist ──────────────────────────────────────────────────
+# Well-known legitimate domains that the model may incorrectly flag.
+# A URL whose registered domain matches one of these is always marked SAFE.
+TRUSTED_DOMAINS = {
+    "google.com", "gmail.com", "youtube.com", "googlemail.com",
+    "github.com", "githubusercontent.com",
+    "microsoft.com", "live.com", "outlook.com", "office.com", "azure.com",
+    "apple.com", "icloud.com",
+    "amazon.com", "aws.amazon.com",
+    "facebook.com", "instagram.com", "whatsapp.com",
+    "twitter.com", "x.com",
+    "linkedin.com",
+    "wikipedia.org",
+    "stackoverflow.com",
+    "reddit.com",
+    "netflix.com",
+    "spotify.com",
+    "paypal.com",          # only the real paypal.com, not paypal-anything.xyz
+    "chase.com", "bankofamerica.com", "wellsfargo.com",
+    "dropbox.com",
+    "zoom.us",
+    "slack.com",
+    "notion.so",
+    "cloudflare.com",
+    "mozilla.org", "firefox.com",
+    "adobe.com",
+    "salesforce.com",
+    "shopify.com",
+}
+
+def _extract_registered_domain(url: str) -> str:
+    """
+    Returns the registered domain (e.g. 'github.com') from a URL.
+    Handles subdomains like docs.github.com → github.com.
+    """
+    try:
+        # Strip scheme
+        host = re.sub(r'^https?://', '', url).split('/')[0].split('?')[0].split(':')[0].lower()
+        parts = host.split('.')
+        # Return last two parts as registered domain
+        if len(parts) >= 2:
+            return '.'.join(parts[-2:])
+        return host
+    except Exception:
+        return ''
+
+def _is_trusted(url: str) -> bool:
+    return _extract_registered_domain(url) in TRUSTED_DOMAINS
+
+# ── Request / Response models ─────────────────────────────────────────────────
 class EmailRequest(BaseModel):
     raw_email: str
-    privacy_mode: bool = True   # Secure by default (never logs data)
+    privacy_mode: bool = True
 
 class URLRequest(BaseModel):
     url: str
@@ -47,8 +97,8 @@ class URLRequest(BaseModel):
 class URLResult(BaseModel):
     url: str
     is_phishing: bool
-    confidence: float           # 0.0 → 1.0 probability of being phishing
-    risk_level: str             # "LOW" | "MEDIUM" | "HIGH" | "CRITICAL"
+    confidence: float
+    risk_level: str
 
 class URLPredictResponse(BaseModel):
     url: str
@@ -59,14 +109,14 @@ class URLPredictResponse(BaseModel):
     message: str
 
 class AnalysisResponse(BaseModel):
-    overall_verdict: str        # "SAFE" | "SUSPICIOUS" | "PHISHING"
+    overall_verdict: str
     overall_confidence: float
     warning_message: str
     url_results: list[URLResult]
     urls_found: int
     phishing_urls_found: int
 
-# Helper Funcs 
+# ── Helpers ───────────────────────────────────────────────────────────────────
 def _risk_level(prob: float) -> str:
     if prob < 0.40:
         return "LOW"
@@ -77,14 +127,26 @@ def _risk_level(prob: float) -> str:
     else:
         return "CRITICAL"
 
+def _score_url(raw_url: str) -> tuple[float, bool]:
+    """
+    Returns (phish_probability, was_whitelisted).
+    Whitelisted domains always return 0.0.
+    """
+    if _is_trusted(raw_url):
+        return 0.0, True
+
+    processed = parser.process_url(raw_url)
+    vec = vectorizer.transform([processed])
+    proba   = model.predict_proba(vec)[0]
+    classes = list(model.classes_)
+    bad_idx = classes.index("bad") if "bad" in classes else 0
+    return float(proba[bad_idx]), False
+
 def _verdict(phishing_urls: int, total_urls: int, max_conf: float) -> tuple[str, str]:
-    """Returns (verdict, warning_message)."""
     if total_urls == 0:
         return "SAFE", "✅ No URLs detected in this email."
-
     if phishing_urls == 0:
         return "SAFE", "✅ All URLs in this email appear legitimate."
-
     ratio = phishing_urls / total_urls
     if max_conf >= 0.85 or ratio >= 0.5:
         verdict = "PHISHING"
@@ -102,7 +164,7 @@ def _verdict(phishing_urls: int, total_urls: int, max_conf: float) -> tuple[str,
         )
     return verdict, msg
 
-# Inference function (passed into PrivacyManager)
+# ── Inference function ────────────────────────────────────────────────────────
 def run_inference(features: dict) -> dict:
     processed_urls = features.get("processed_urls", [])
 
@@ -118,16 +180,9 @@ def run_inference(features: dict) -> dict:
 
     url_results = []
     for entry in processed_urls:
-        raw_url       = entry["raw"]
-        processed_url = entry["processed"]
-
-        vec = vectorizer.transform([processed_url])
-
-        proba        = model.predict_proba(vec)[0]
-        classes      = list(model.classes_)
-        bad_idx      = classes.index("bad") if "bad" in classes else 0
-        phish_prob   = float(proba[bad_idx])
-        is_phishing  = phish_prob >= 0.5
+        raw_url = entry["raw"]
+        phish_prob, whitelisted = _score_url(raw_url)
+        is_phishing = phish_prob >= 0.5
 
         url_results.append(URLResult(
             url         = raw_url,
@@ -149,7 +204,7 @@ def run_inference(features: dict) -> dict:
         "phishing_urls_found": len(phishing_urls),
     }
 
-# Routes 
+# ── Routes ────────────────────────────────────────────────────────────────────
 @app.get("/health")
 async def health():
     return {"status": "ok", "model": MODEL_PATH, "vectorizer": VECTORIZER_PATH}
@@ -157,22 +212,23 @@ async def health():
 @app.post("/predict", response_model=URLPredictResponse)
 async def predict_url(request: URLRequest):
     """Check a single URL directly — no email needed."""
-    processed = parser.process_url(request.url)
-    vec = vectorizer.transform([processed])
-
-    proba   = model.predict_proba(vec)[0]
-    classes = list(model.classes_)
-    bad_idx = classes.index("bad") if "bad" in classes else 0
-    prob    = float(proba[bad_idx])
+    prob, whitelisted = _score_url(request.url)
     is_phishing = prob >= 0.5
-    risk    = _risk_level(prob)
+    risk = _risk_level(prob)
 
-    if is_phishing:
+    if whitelisted:
+        verdict = "SAFE"
+        message = "✅ This domain is on the trusted whitelist and appears safe."
+    elif is_phishing:
         verdict = "PHISHING" if prob >= 0.85 else "SUSPICIOUS"
-        message = f"This URL appears malicious ({prob*100:.1f}% confidence). Do NOT visit." if prob >= 0.85 else f"⚠️ This URL looks suspicious ({prob*100:.1f}% confidence). Proceed with caution."
+        message = (
+            f"🚨 This URL appears malicious ({prob*100:.1f}% confidence). Do NOT visit."
+            if prob >= 0.85 else
+            f"⚠️ This URL looks suspicious ({prob*100:.1f}% confidence). Proceed with caution."
+        )
     else:
         verdict = "SAFE"
-        message = f"This URL appears safe ({(1-prob)*100:.1f}% confidence)."
+        message = f"✅ This URL appears safe ({(1-prob)*100:.1f}% confidence)."
 
     return URLPredictResponse(
         url         = request.url,
@@ -188,9 +244,9 @@ async def analyze_email(request: EmailRequest):
     parsed_features = parser.extract_and_process(request.raw_email)
 
     result = PrivacyManager.evaluate_payload(
-        email_data        = parsed_features,
-        is_private        = request.privacy_mode,
-        model_predict_func= run_inference,
+        email_data         = parsed_features,
+        is_private         = request.privacy_mode,
+        model_predict_func = run_inference,
     )
 
     return result
