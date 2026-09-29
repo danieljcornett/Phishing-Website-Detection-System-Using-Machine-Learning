@@ -2,7 +2,7 @@
 
 A web app that checks URLs and emails for phishing links. A logistic regression model, trained on more than 500,000 labelled URLs, scores each link and shows which words in it drove the verdict.
 
-**Live demo:** https://YOUR-PROJECT.vercel.app
+**Live demo:** https://phishing-detection-system-using-mac.vercel.app
 
 ## Features
 
@@ -83,7 +83,7 @@ npm run dev
 
 To run both services together the way Vercel does, use `vercel dev` from the repository root.
 
-After deploying, open `https://YOUR-PROJECT.vercel.app/api/health`. It should return `{"status": "ok", ...}`. The first request after a period of inactivity can take a few seconds while the function starts up.
+After deploying, open `https://<your-project>.vercel.app/api/health` (for this project: https://phishing-detection-system-using-mac.vercel.app/api/health). It should return `{"status": "ok", ...}`. The first request after a period of inactivity can take a few seconds while the function starts up.
 
 ## Retraining the model
 
