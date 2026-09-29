@@ -7,7 +7,11 @@ import {
 } from './components/icons';
 import { RISK, VERDICT } from './risk';
 
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+// Local dev talks to uvicorn directly; the Vercel deployment serves the API from /api on the same domain
+const API_BASE = import.meta.env.VITE_API_URL || (import.meta.env.DEV ? 'http://localhost:8000' : '/api');
+const OFFLINE_HINT = import.meta.env.DEV
+  ? 'Start it with "uvicorn main:app" from the phishing_api folder.'
+  : 'The detection service may be starting up. Wait a few seconds and try again.';
 
 // From the evaluation cells in modetSetup.ipynb (held-out 20% test split)
 const MODEL_METRICS = [
@@ -50,7 +54,7 @@ async function postJson(path, body) {
       body: JSON.stringify(body),
     });
   } catch {
-    const err = new Error(`Could not reach the API at ${API_BASE}. Start it with "uvicorn main:app" from the phishing_api folder.`);
+    const err = new Error(`Could not reach the API at ${API_BASE}. ${OFFLINE_HINT}`);
     err.offline = true;
     throw err;
   }
@@ -99,7 +103,7 @@ const UrlResult = ({ data }) => (
     </VerdictHeader>
     <p className="rounded-lg bg-raised border border-line px-3 py-2 font-mono text-sm text-ink break-all">{data.url}</p>
     <ProbabilityMeter value={data.phishing_probability} riskLevel={data.risk_level} />
-    <SignalBars signals={data.signals} />
+    <SignalBars signals={data.signals} trusted={data.trusted_domain} />
   </div>
 );
 
@@ -137,7 +141,7 @@ const EmailResult = ({ data, privacyMode }) => (
                   <ChevronDownIcon className="w-4 h-4 flex-none text-ink-muted motion-safe:transition-transform group-open:rotate-180" />
                 </summary>
                 <div className="border-t border-line px-4 py-4">
-                  <SignalBars signals={u.signals} />
+                  <SignalBars signals={u.signals} trusted={u.trusted_domain} />
                 </div>
               </details>
             </li>
@@ -441,8 +445,9 @@ export default function App() {
               The model only sees the words in a URL, not the page content or the domain's reputation. Words that
               are common in phishing kits, such as <span className="font-mono text-ink">login</span>,{' '}
               <span className="font-mono text-ink">mail</span> and <span className="font-mono text-ink">paypal</span>,
-              can flag legitimate pages like <span className="font-mono text-ink">github.com/login</span>. Treat a
-              result as one signal, not a final answer.
+              can flag legitimate pages like <span className="font-mono text-ink">github.com/login</span>. A short
+              list of trusted domains catches the most common of these; everything else is scored by the model.
+              Treat a result as one signal, not a final answer.
             </p>
           </div>
         </section>

@@ -11,7 +11,16 @@ const Swatch = ({ color, label }) => (
 );
 
 // Diverging bar list: each token's weight (count x model coefficient) around a neutral zero line
-export default function SignalBars({ signals }) {
+export default function SignalBars({ signals, trusted = false }) {
+  if (trusted) {
+    return (
+      <p className="text-sm text-ink-muted">
+        This domain is on the trusted domain list, so it is marked safe without running the model. The list
+        covers well-known sites that the word-based model can misread, such as github.com/login.
+      </p>
+    );
+  }
+
   if (!signals.length) {
     return (
       <p className="text-sm text-ink-muted">

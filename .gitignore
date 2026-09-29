@@ -11,3 +11,7 @@ dist/
 # Local environment
 .env
 .env.local
+
+# Editor / tooling
+.vscode/
+.claude/
