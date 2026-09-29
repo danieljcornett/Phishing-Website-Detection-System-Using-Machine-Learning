@@ -1,0 +1,13 @@
+# Python
+venv/
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+
+# Frontend
+node_modules/
+dist/
+
+# Local environment
+.env
+.env.local

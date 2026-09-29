@@ -3,6 +3,15 @@ import re
 from nltk.tokenize import RegexpTokenizer
 from nltk.stem.snowball import SnowballStemmer
 
+# Must match normalize_url in modetSetup.ipynb so serving input matches training input
+SCHEME_RE = re.compile(r'^[a-zA-Z][a-zA-Z0-9+.-]*://')
+URL_RE = re.compile(r'''https?://[^\s<>"'()]+|www\.[^\s<>"'()]+''', re.IGNORECASE)
+TRAILING_PUNCT = '.,;:!?]}>'
+
+
+def normalize_url(url: str) -> str:
+    return SCHEME_RE.sub('', url.strip())
+
 
 class EmailParser:
     def __init__(self):
@@ -10,8 +19,8 @@ class EmailParser:
         self.stemmer = SnowballStemmer('english')
 
     def process_url(self, url: str) -> str:
-        """Tokenize + stem a single URL for the ML model."""
-        tokens = self.tokenizer.tokenize(url)
+        """Normalize, tokenize and stem a single URL for the ML model."""
+        tokens = self.tokenizer.tokenize(normalize_url(url))
         return ' '.join([self.stemmer.stem(t) for t in tokens])
 
     def extract_and_process(self, raw_email: str) -> dict:
@@ -51,5 +60,6 @@ class EmailParser:
         return '\n'.join(body_lines)
 
     def _extract_urls(self, text: str) -> list:
-        url_pattern = re.compile(r'https?://\S+|www\.\S+')
-        return url_pattern.findall(text)
+        """Finds URLs, trims sentence punctuation, and drops duplicates (order preserved)."""
+        urls = (m.rstrip(TRAILING_PUNCT) for m in URL_RE.findall(text))
+        return list(dict.fromkeys(u for u in urls if u))

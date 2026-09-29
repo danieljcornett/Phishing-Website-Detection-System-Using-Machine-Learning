@@ -1,30 +1,30 @@
 # main.py
 import os
 import joblib
-import nltk
-import numpy as np
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from parser import EmailParser
 from privacy import PrivacyManager
 
-# NLTK bootstrap
-nltk.download('punkt', quiet=True)
-nltk.download('punkt_tab', quiet=True)
-
-# Load model + vectorizer 
-MODEL_PATH      = os.getenv("MODEL_PATH",      "phishing.pkl")
-VECTORIZER_PATH = os.getenv("VECTORIZER_PATH", "vectorizer.pkl")
+# Load model + vectorizer (both exported together by modetSetup.ipynb)
+BASE_DIR        = os.path.dirname(os.path.abspath(__file__))
+MODEL_PATH      = os.getenv("MODEL_PATH",      os.path.join(BASE_DIR, "phishing.pkl"))
+VECTORIZER_PATH = os.getenv("VECTORIZER_PATH", os.path.join(BASE_DIR, "vectorizer.pkl"))
 
 model      = joblib.load(MODEL_PATH)
 vectorizer = joblib.load(VECTORIZER_PATH)
 
-# App setup 
+BAD_IDX       = list(model.classes_).index("bad")
+FEATURE_NAMES = vectorizer.get_feature_names_out()
+# coef_ is expressed toward classes_[1]; flip it so positive always means "toward phishing"
+PHISH_COEF    = model.coef_[0] if BAD_IDX == 1 else -model.coef_[0]
+
+# App setup
 app = FastAPI(
     title="Anti-Phishing Detection API",
     description="Scans email URLs and returns a phishing risk assessment.",
-    version="1.0.0",
+    version="1.1.0",
 )
 
 app.add_middleware(
@@ -38,35 +38,36 @@ parser = EmailParser()
 
 # Request / Response models
 class EmailRequest(BaseModel):
-    raw_email: str
+    raw_email: str = Field(min_length=1)
     privacy_mode: bool = True   # Secure by default (never logs data)
 
 class URLRequest(BaseModel):
-    url: str
+    url: str = Field(min_length=1)
+
+class Signal(BaseModel):
+    token: str
+    weight: float               # > 0 pushes toward phishing, < 0 toward safe
 
 class URLResult(BaseModel):
     url: str
     is_phishing: bool
-    confidence: float           # 0.0 → 1.0 probability of being phishing
+    phishing_probability: float # 0.0 -> 1.0
     risk_level: str             # "LOW" | "MEDIUM" | "HIGH" | "CRITICAL"
+    signals: list[Signal]
 
-class URLPredictResponse(BaseModel):
-    url: str
-    is_phishing: bool
-    confidence: float
-    risk_level: str
+class URLPredictResponse(URLResult):
     verdict: str
     message: str
 
 class AnalysisResponse(BaseModel):
     overall_verdict: str        # "SAFE" | "SUSPICIOUS" | "PHISHING"
-    overall_confidence: float
+    overall_probability: float
     warning_message: str
     url_results: list[URLResult]
     urls_found: int
     phishing_urls_found: int
 
-# Helper Funcs 
+# Helper Funcs
 def _risk_level(prob: float) -> str:
     if prob < 0.40:
         return "LOW"
@@ -77,111 +78,90 @@ def _risk_level(prob: float) -> str:
     else:
         return "CRITICAL"
 
-def _verdict(phishing_urls: int, total_urls: int, max_conf: float) -> tuple[str, str]:
+def _signals(vec, top_n: int = 6) -> list[Signal]:
+    """Tokens in this URL ranked by how much they moved the prediction."""
+    contributions = [
+        (FEATURE_NAMES[i], float(PHISH_COEF[i] * count))
+        for i, count in zip(vec.indices, vec.data)
+    ]
+    contributions.sort(key=lambda c: abs(c[1]), reverse=True)
+    return [Signal(token=t, weight=round(w, 3)) for t, w in contributions[:top_n]]
+
+def score_url(raw_url: str, processed_url: str) -> URLResult:
+    vec  = vectorizer.transform([processed_url])
+    prob = float(model.predict_proba(vec)[0][BAD_IDX])
+    return URLResult(
+        url                  = raw_url,
+        is_phishing          = prob >= 0.5,
+        phishing_probability = round(prob, 4),
+        risk_level           = _risk_level(prob),
+        signals              = _signals(vec),
+    )
+
+def _verdict(phishing_urls: int, total_urls: int, max_prob: float) -> tuple[str, str]:
     """Returns (verdict, warning_message)."""
     if total_urls == 0:
-        return "SAFE", "✅ No URLs detected in this email."
+        return "SAFE", "No URLs detected in this email."
 
     if phishing_urls == 0:
-        return "SAFE", "✅ All URLs in this email appear legitimate."
+        return "SAFE", "All URLs in this email appear legitimate."
 
     ratio = phishing_urls / total_urls
-    if max_conf >= 0.85 or ratio >= 0.5:
+    if max_prob >= 0.85 or ratio >= 0.5:
         verdict = "PHISHING"
         msg = (
-            f"🚨 WARNING: This email is very likely a phishing attempt! "
+            f"This email is very likely a phishing attempt. "
             f"{phishing_urls} of {total_urls} URL(s) flagged as malicious "
-            f"(up to {max_conf*100:.1f}% confidence). Do NOT click any links."
+            f"(up to {max_prob*100:.1f}% probability). Do not click any links."
         )
     else:
         verdict = "SUSPICIOUS"
         msg = (
-            f"⚠️  CAUTION: This email contains suspicious URL(s). "
+            f"This email contains suspicious URL(s). "
             f"{phishing_urls} of {total_urls} URL(s) may be malicious "
-            f"(up to {max_conf*100:.1f}% confidence). Proceed carefully."
+            f"(up to {max_prob*100:.1f}% probability). Proceed carefully."
         )
     return verdict, msg
 
 # Inference function (passed into PrivacyManager)
 def run_inference(features: dict) -> dict:
-    processed_urls = features.get("processed_urls", [])
-
-    if not processed_urls:
-        return {
-            "overall_verdict": "SAFE",
-            "overall_confidence": 0.0,
-            "warning_message": "✅ No URLs detected in this email.",
-            "url_results": [],
-            "urls_found": 0,
-            "phishing_urls_found": 0,
-        }
-
-    url_results = []
-    for entry in processed_urls:
-        raw_url       = entry["raw"]
-        processed_url = entry["processed"]
-
-        vec = vectorizer.transform([processed_url])
-
-        proba        = model.predict_proba(vec)[0]
-        classes      = list(model.classes_)
-        bad_idx      = classes.index("bad") if "bad" in classes else 0
-        phish_prob   = float(proba[bad_idx])
-        is_phishing  = phish_prob >= 0.5
-
-        url_results.append(URLResult(
-            url         = raw_url,
-            is_phishing = is_phishing,
-            confidence  = round(phish_prob, 4),
-            risk_level  = _risk_level(phish_prob),
-        ))
+    url_results = [
+        score_url(entry["raw"], entry["processed"])
+        for entry in features.get("processed_urls", [])
+    ]
 
     phishing_urls = [r for r in url_results if r.is_phishing]
-    max_conf      = max((r.confidence for r in url_results), default=0.0)
-    verdict, msg  = _verdict(len(phishing_urls), len(url_results), max_conf)
+    max_prob      = max((r.phishing_probability for r in url_results), default=0.0)
+    verdict, msg  = _verdict(len(phishing_urls), len(url_results), max_prob)
 
     return {
-        "overall_verdict":    verdict,
-        "overall_confidence": round(max_conf, 4),
-        "warning_message":    msg,
-        "url_results":        [r.dict() for r in url_results],
-        "urls_found":         len(url_results),
+        "overall_verdict":     verdict,
+        "overall_probability": round(max_prob, 4),
+        "warning_message":     msg,
+        "url_results":         [r.model_dump() for r in url_results],
+        "urls_found":          len(url_results),
         "phishing_urls_found": len(phishing_urls),
     }
 
-# Routes 
+# Routes
 @app.get("/health")
 async def health():
-    return {"status": "ok", "model": MODEL_PATH, "vectorizer": VECTORIZER_PATH}
+    return {"status": "ok", "model": os.path.basename(MODEL_PATH), "vocabulary_size": len(FEATURE_NAMES)}
 
 @app.post("/predict", response_model=URLPredictResponse)
 async def predict_url(request: URLRequest):
-    """Check a single URL directly — no email needed."""
-    processed = parser.process_url(request.url)
-    vec = vectorizer.transform([processed])
+    """Check a single URL directly, no email needed."""
+    result = score_url(request.url, parser.process_url(request.url))
+    prob   = result.phishing_probability
 
-    proba   = model.predict_proba(vec)[0]
-    classes = list(model.classes_)
-    bad_idx = classes.index("bad") if "bad" in classes else 0
-    prob    = float(proba[bad_idx])
-    is_phishing = prob >= 0.5
-    risk    = _risk_level(prob)
-
-    if is_phishing:
-        verdict = "PHISHING" if prob >= 0.85 else "SUSPICIOUS"
-        message = f"This URL appears malicious ({prob*100:.1f}% confidence). Do NOT visit." if prob >= 0.85 else f"⚠️ This URL looks suspicious ({prob*100:.1f}% confidence). Proceed with caution."
+    if prob >= 0.85:
+        verdict, message = "PHISHING", f"This URL appears malicious ({prob*100:.1f}% probability). Do not visit it."
+    elif result.is_phishing:
+        verdict, message = "SUSPICIOUS", f"This URL looks suspicious ({prob*100:.1f}% probability). Proceed with caution."
     else:
-        verdict = "SAFE"
-        message = f"This URL appears safe ({(1-prob)*100:.1f}% confidence)."
+        verdict, message = "SAFE", f"This URL appears safe ({(1-prob)*100:.1f}% probability of being legitimate)."
 
-    return URLPredictResponse(
-        url         = request.url,
-        is_phishing = is_phishing,
-        confidence  = round(prob, 4),
-        risk_level  = risk,
-        verdict     = verdict,
-        message     = message,
-    )
+    return URLPredictResponse(**result.model_dump(), verdict=verdict, message=message)
 
 @app.post("/analyze", response_model=AnalysisResponse)
 async def analyze_email(request: EmailRequest):

@@ -4,8 +4,8 @@ uvicorn[standard]==0.34.0
 pydantic==2.11.1
 
 # NLP and Machine Learning
+# scikit-learn must match the version used to export phishing.pkl in modetSetup.ipynb
 nltk==3.9.1
-scikit-learn==1.6.1
-pandas==2.2.3
+scikit-learn==1.7.2
 numpy==2.2.4
 joblib==1.4.2
