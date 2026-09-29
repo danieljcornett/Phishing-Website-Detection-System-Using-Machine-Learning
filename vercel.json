@@ -1,15 +1,18 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "installCommand": "npm ci --prefix frontend",
-  "buildCommand": "npm run build --prefix frontend",
-  "outputDirectory": "frontend/dist",
-  "functions": {
-    "api/index.py": {
-      "includeFiles": "phishing_api/**",
-      "maxDuration": 30
+  "services": {
+    "frontend": {
+      "root": "frontend",
+      "framework": "vite"
+    },
+    "phishing_api": {
+      "root": "phishing_api",
+      "framework": "fastapi",
+      "entrypoint": "main.py"
     }
   },
   "rewrites": [
-    { "source": "/api/(.*)", "destination": "/api/index" }
+    { "source": "/api/(.*)", "destination": { "service": "phishing_api" } },
+    { "source": "/(.*)", "destination": { "service": "frontend" } }
   ]
 }

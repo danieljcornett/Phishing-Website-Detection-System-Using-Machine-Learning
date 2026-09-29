@@ -35,6 +35,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+@app.middleware("http")
+async def strip_api_prefix(request, call_next):
+    """On Vercel the API is public under /api; accept /api/predict as well as /predict."""
+    path = request.scope["path"]
+    if path == "/api" or path.startswith("/api/"):
+        request.scope["path"] = path[4:] or "/"
+    return await call_next(request)
+
 parser = EmailParser()
 
 # Trusted domain whitelist

@@ -37,7 +37,7 @@ Dataset: [Phishing Site URLs (Kaggle)](https://www.kaggle.com/datasets/taruntiwa
 - **Model:** Python, scikit-learn, NLTK, pandas (Jupyter)
 - **API:** FastAPI
 - **Frontend:** React, Vite, Tailwind CSS
-- **Hosting:** Vercel. The frontend is served as static files, and the API runs as a Python serverless function under `/api`.
+- **Hosting:** Vercel, as one project with two services on the same domain: the React frontend and the FastAPI backend under `/api`.
 
 ## Project structure
 
@@ -49,9 +49,8 @@ phishing_api/
   privacy.py            Zero-retention handling
   phishing.pkl          Trained model
   vectorizer.pkl        Fitted CountVectorizer
-api/index.py            Vercel entry point (serves the API under /api)
 frontend/               React app
-vercel.json             Vercel build and routing config
+vercel.json             Vercel services and routing config
 ```
 
 ## Run locally
@@ -78,7 +77,11 @@ npm run dev
 ## Deploy to Vercel
 
 1. Import the GitHub repository into [Vercel](https://vercel.com/new). Leave the Root Directory set to the repository root.
-2. Click **Deploy**. `vercel.json` handles the build, and the root `requirements.txt` installs the API's dependencies.
+2. Click **Deploy**. `vercel.json` defines two services:
+   - `frontend` (Vite, from `frontend/`) serves every path except `/api`.
+   - `phishing_api` (FastAPI, from `phishing_api/`) serves `/api/*` and installs its dependencies from `phishing_api/requirements.txt`.
+
+To run both services together the way Vercel does, use `vercel dev` from the repository root.
 
 After deploying, open `https://YOUR-PROJECT.vercel.app/api/health`. It should return `{"status": "ok", ...}`. The first request after a period of inactivity can take a few seconds while the function starts up.
 
