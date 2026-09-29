@@ -74,17 +74,6 @@ npm install
 npm run dev
 ```
 
-## Deploy to Vercel
-
-1. Import the GitHub repository into [Vercel](https://vercel.com/new). Leave the Root Directory set to the repository root.
-2. Click **Deploy**. `vercel.json` defines two services:
-   - `frontend` (Vite, from `frontend/`) serves every path except `/api`.
-   - `phishing_api` (FastAPI, from `phishing_api/`) serves `/api/*` and installs its dependencies from `phishing_api/requirements.txt`.
-
-To run both services together the way Vercel does, use `vercel dev` from the repository root.
-
-After deploying, open `https://<your-project>.vercel.app/api/health` (for this project: https://phishing-detection-system-using-mac.vercel.app/api/health). It should return `{"status": "ok", ...}`. The first request after a period of inactivity can take a few seconds while the function starts up.
-
 ## Retraining the model
 
 Run every cell in `modetSetup.ipynb` from the repository root with `phishing_site_urls.csv` present. The final cell overwrites `phishing_api/phishing.pkl` and `phishing_api/vectorizer.pkl`. Use scikit-learn 1.7.2, the version pinned in both `requirements.txt` files, so the saved model loads the same way everywhere.
