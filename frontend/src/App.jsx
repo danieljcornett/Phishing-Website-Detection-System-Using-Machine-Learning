@@ -9,7 +9,12 @@ import { RISK, VERDICT } from './risk';
 
 // Local dev talks to uvicorn directly; the Vercel deployment serves the API from /api on the same domain
 const API_BASE = import.meta.env.VITE_API_URL || (import.meta.env.DEV ? 'http://localhost:8000' : '/api');
-const OFFLINE_HINT = import.meta.env.DEV
+// Mirror the size caps in phishing_api/main.py
+const MAX_URL_LENGTH = 2048;
+const MAX_EMAIL_LENGTH = 20000;
+const MAX_EMAIL_URLS = 25;
+
+const OFFLINE_HINT =import.meta.env.DEV
   ? 'Start it with "uvicorn main:app" from the phishing_api folder.'
   : 'The detection service may be starting up. Wait a few seconds and try again.';
 
@@ -61,6 +66,9 @@ async function postJson(path, body) {
   const data = await res.json().catch(() => null);
   if (!res.ok) {
     const detail = typeof data?.detail === 'string' ? data.detail : null;
+    if (!detail && res.status === 422) {
+      throw new Error(`Input is too long. URLs are limited to ${MAX_URL_LENGTH.toLocaleString()} characters and emails to ${MAX_EMAIL_LENGTH.toLocaleString()}.`);
+    }
     throw new Error(detail || `The API returned an error (HTTP ${res.status}).`);
   }
   return data;
@@ -288,6 +296,7 @@ export default function App() {
                   <input
                     id="url-input"
                     type="text"
+                    maxLength={MAX_URL_LENGTH}
                     inputMode="url"
                     autoComplete="off"
                     spellCheck={false}
@@ -307,6 +316,7 @@ export default function App() {
                     <label htmlFor="email-input" className="block text-sm font-medium text-ink mb-1.5">Email content</label>
                     <textarea
                       id="email-input"
+                      maxLength={MAX_EMAIL_LENGTH}
                       value={emailText}
                       onChange={e => setEmailText(e.target.value)}
                       placeholder="Paste the full email, including headers and links"
@@ -315,7 +325,7 @@ export default function App() {
                       className="w-full resize-y rounded-lg border border-line bg-canvas px-3.5 py-3 text-sm text-ink placeholder:text-ink-faint focus:outline-none focus:border-accent focus:ring-2 focus:ring-accent/40"
                     />
                     <p id="email-help" className="mt-1.5 text-xs text-ink-muted">
-                      Every link in the email is extracted and scored on its own.
+                      Every link in the email is extracted and scored on its own (up to {MAX_EMAIL_URLS} links).
                     </p>
                   </div>
                   <div className="flex items-start justify-between gap-4 rounded-lg border border-line bg-canvas px-3.5 py-3">

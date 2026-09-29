@@ -28,11 +28,15 @@ app = FastAPI(
     version="1.1.0",
 )
 
+# In production the frontend is served from the same domain, so CORS is only needed for local dev.
+# Other websites cannot call this API from their visitors' browsers.
+ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173").split(",")
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=ALLOWED_ORIGINS,
+    allow_methods=["GET", "POST"],
+    allow_headers=["Content-Type"],
 )
 
 @app.middleware("http")
@@ -85,12 +89,17 @@ def _is_trusted(url: str) -> bool:
     return any(host == d or host.endswith('.' + d) for d in TRUSTED_DOMAINS)
 
 # Request / Response models
+# Size caps keep every request cheap, so abuse cannot burn through the hosting quota
+MAX_URL_LENGTH   = 2_048
+MAX_EMAIL_LENGTH = 20_000
+MAX_EMAIL_URLS   = 25
+
 class EmailRequest(BaseModel):
-    raw_email: str = Field(min_length=1)
+    raw_email: str = Field(min_length=1, max_length=MAX_EMAIL_LENGTH)
     privacy_mode: bool = True   # Secure by default (never logs data)
 
 class URLRequest(BaseModel):
-    url: str = Field(min_length=1)
+    url: str = Field(min_length=1, max_length=MAX_URL_LENGTH)
 
 class Signal(BaseModel):
     token: str
@@ -186,7 +195,7 @@ def _verdict(phishing_urls: int, total_urls: int, max_prob: float) -> tuple[str,
 def run_inference(features: dict) -> dict:
     url_results = [
         score_url(entry["raw"], entry["processed"])
-        for entry in features.get("processed_urls", [])
+        for entry in features.get("processed_urls", [])[:MAX_EMAIL_URLS]
     ]
 
     phishing_urls = [r for r in url_results if r.is_phishing]
